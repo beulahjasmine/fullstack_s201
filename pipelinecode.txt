@@ -7,45 +7,69 @@ pipeline {
     }
 
     environment {
-        TOMCAT_URL  = 'http://13.49.209.132:9090/manager/text'
-        MAIN_REPO   = 'https://github.com/beulahjasmine/fullstack_s201.git'
+        TOMCAT_URL = 'http://13.49.209.132:9090/manager/text'
+        TOMCAT_USER = 'admin'
+        TOMCAT_PASS = 'admin'
+
+        MAIN_REPO = 'https://github.com/beulahjasmine/fullstack_s201.git'
+
         BACKEND_DIR = 'crud_back'
         FRONTEND_DIR = 'crud_front'
+
         BACKEND_WAR = 'crud_back/target/springapp1.war'
-        FRONTEND_WAR = 'crud_front/target/frontapp1.war'
+        FRONTEND_WAR = 'crud_front/frontapp1.war'
     }
 
     stages {
-        stage('Checkout') {
+        stage('Clone Repository') {
             steps {
-                git branch: 'main', url: "${MAIN_REPO}"
+                git branch: 'main', url: "${env.MAIN_REPO}"
             }
         }
 
-        stage('Build Backend') {
+        stage('Build React Frontend') {
             steps {
-                dir("${BACKEND_DIR}") {
-                    sh "mvn clean package"
+                script {
+                    def nodeHome = tool name: 'NODE_HOME', type: 'jenkins.plugins.nodejs.tools.NodeJSInstallation'
+                    env.PATH = "${nodeHome}/bin:${env.PATH}"
+                }
+                dir("${env.FRONTEND_DIR}") {
+                    sh 'npm install'
+                    sh 'npm run build'
                 }
             }
         }
 
-        stage('Build Frontend') {
+        stage('Package React as WAR') {
             steps {
-                dir("${FRONTEND_DIR}") {
-                    sh "mvn clean package"
+                script {
+                    def warDir = "${env.FRONTEND_DIR}/war_content"
+                    sh "rm -rf ${warDir}"
+                    sh "mkdir -p ${warDir}/META-INF ${warDir}/WEB-INF"
+                    sh "cp -r ${env.FRONTEND_DIR}/dist/* ${warDir}/"
+                    sh "jar -cvf ${env.FRONTEND_WAR} -C ${warDir} ."
                 }
             }
         }
 
-        stage('Deploy to Tomcat') {
+        stage('Build Spring Boot App') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'tomcat-creds', usernameVariable: 'TOMCAT_USER', passwordVariable: 'TOMCAT_PASS')]) {
-                    sh """
-                        curl -u $TOMCAT_USER:$TOMCAT_PASS --upload-file ${BACKEND_WAR} "${TOMCAT_URL}/deploy?path=/backend&update=true"
-                        curl -u $TOMCAT_USER:$TOMCAT_PASS --upload-file ${FRONTEND_WAR} "${TOMCAT_URL}/deploy?path=/frontend&update=true"
-                    """
+                dir("${env.BACKEND_DIR}") {
+                    sh 'mvn clean package'
+                    sh 'mv target/*.war target/springapp1.war'
                 }
+            }
+        }
+
+        stage('Deploy Spring Boot WAR') {
+            steps {
+                sh "curl -u ${env.TOMCAT_USER}:${env.TOMCAT_PASS} --upload-file \"${env.BACKEND_WAR}\" \"${env.TOMCAT_URL}/deploy?path=/springapp1&update=true\""
+            }
+        }
+
+        stage('Deploy Frontend WAR') {
+            steps {
+                sh "curl -u ${env.TOMCAT_USER}:${env.TOMCAT_PASS} --upload-file \"${env.FRONTEND_WAR}\" \"${env.TOMCAT_URL}/deploy?path=/frontapp1&update=true\""
             }
         }
     }
